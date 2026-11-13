@@ -419,12 +419,99 @@ def run_voice_pipeline():
     return test_records, optimal_threshold, eer_val
 
 
+def verify_live_voice(optimal_threshold=0.949):
+    """
+    Интерактивная живая верификация диктора через микрофон:
+    1. Загружает сохранённый эталон Дархана Аканова.
+    2. Записывает 3.5 секунды речи с микрофона.
+    3. Извлекает MFCC и L2-эмбеддинг.
+    4. Вычисляет косинусное сходство (Cosine Similarity) с эталоном.
+    5. Выдаёт вердикт: Свой (Дархан Аканов) или Чужой (Отказ).
+    """
+    try:
+        import sounddevice as sd
+    except ImportError:
+        print("[ОШИБКА] Библиотека sounddevice не установлена. Выполните: pip install sounddevice")
+        return
+    import time
+
+    print("\n" + "=" * 70)
+    print("ЖИВАЯ ПРОВЕРКА ГОЛОСА (LIVE VOICE VERIFICATION)")
+    print("Эталон: Аканов Дархан (гр. SIS-2309, ID: 38041)")
+    print(f"Рабочий порог распознавания: T* = {optimal_threshold:.3f}")
+    print("=" * 70)
+
+    # Строим эталон Дархана из первых 3 фраз
+    darkhan_files = sorted(list((DATASETS_DIR / "darkhan_akanov").glob("phrase_*.wav")))[:3]
+    if len(darkhan_files) == 0:
+        print("[ОШИБКА] Не найдены эталонные записи в datasets/voice_samples/darkhan_akanov/")
+        return
+
+    embs = []
+    for df in darkhan_files:
+        _, _, _, _, _, emb = extract_embedding(df)
+        embs.append(emb)
+    template = np.mean(embs, axis=0)
+    template = template / np.linalg.norm(template)
+
+    sr = 16000
+    duration = 3.5
+    print("\nГотовы проверить свой голос?")
+    print("Подсказка:")
+    print("  - Скажите любую фразу обычным голосом (система должна разрешить доступ).")
+    print("  - Попросите сказать фразу друга или включите чужое видео (система откажет).")
+    input("\nНажмите [Enter] для начала записи...")
+
+    for i in [3, 2, 1]:
+        print(f"Запись начнётся через {i}...", end="\r", flush=True)
+        time.sleep(1)
+    print(">>> ИДЁТ ЗАПИСЬ... ГОВОРИТЕ В МИКРОФОН! <<<          ")
+
+    audio = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype='float32')
+    sd.wait()
+    print("[Запись завершена. Извлечение MFCC признаков...]")
+
+    audio = audio.flatten()
+    audio -= np.mean(audio)
+    max_amp = np.max(np.abs(audio))
+    if max_amp > 1e-4:
+        audio = 0.9 * (audio / max_amp)
+
+    temp_path = REPORTS_DIR / "temp_live_test.wav"
+    if HAS_SOUNDFILE:
+        sf.write(str(temp_path), audio, sr)
+    else:
+        wavfile.write(str(temp_path), sr, (audio * 32767).astype(np.int16))
+
+    _, _, live_mfcc, _, _, live_emb = extract_embedding(temp_path)
+    score = float(cosine_similarity(live_emb, template))
+
+    print("\n" + "=" * 70)
+    print("РЕЗУЛЬТАТ ВЕРИФИКАЦИИ:")
+    print(f"  Косинусное сходство (Cosine Similarity): {score:.4f}")
+    print(f"  Порог отсечения (T*):                   {optimal_threshold:.4f}")
+    print("-" * 70)
+
+    if score >= optimal_threshold:
+        print(f"  ВЕРДИКТ: [ДОСТУП РАЗРЕШЁН] ✅")
+        print(f"  Голос успешно верифицирован: Аканов Дархан (гр. SIS-2309)")
+        print(f"  Запас надёжности над порогом: +{score - optimal_threshold:.4f}")
+    else:
+        print(f"  ВЕРДИКТ: [ДОСТУП ЗАПРЕЩЁН] ❌")
+        print(f"  Голос НЕ принадлежит Дархану Аканову! (Чужак / Impostor)")
+        print(f"  Нехватка сходства до порога: -{optimal_threshold - score:.4f}")
+    print("=" * 70)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Занятие 8. Голосовая биометрия (Аканов Дархан SIS-2309)")
     parser.add_argument("--record", action="store_true", help="Записать контрольную фразу с микрофона перед верификацией")
+    parser.add_argument("--live", action="store_true", help="Интерактивная живая проверка голоса в реальном времени")
     args = parser.parse_args()
 
-    if args.record:
+    if args.live:
+        verify_live_voice()
+    elif args.record:
         print("[Интерактивный режим микрофона]")
         try:
             import sounddevice as sd
@@ -442,5 +529,6 @@ if __name__ == "__main__":
             print(f"Запись сохранена: {temp_path.name}")
         except Exception as e:
             print(f"Ошибка записи с микрофона: {e}")
-
-    run_voice_pipeline()
+        run_voice_pipeline()
+    else:
+        run_voice_pipeline()
