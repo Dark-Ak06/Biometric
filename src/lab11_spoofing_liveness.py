@@ -265,5 +265,8 @@ def run_lab11_pipeline():
     return apcer, bpcer
 
 
+main = run_lab11_pipeline
+
+
 if __name__ == "__main__":
-    run_lab11_pipeline()
+    main()

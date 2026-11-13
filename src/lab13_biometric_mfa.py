@@ -245,5 +245,8 @@ def run_lab13_pipeline():
     print("=" * 70)
 
 
+main = run_lab13_pipeline
+
+
 if __name__ == "__main__":
-    run_lab13_pipeline()
+    main()

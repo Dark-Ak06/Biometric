@@ -459,5 +459,8 @@ def run_image_preprocessing_pipeline():
     print("=" * 70)
 
 
+main = run_image_preprocessing_pipeline
+
+
 if __name__ == "__main__":
-    run_image_preprocessing_pipeline()
+    main()

@@ -260,5 +260,8 @@ def run_lab12_pipeline():
     return eer_f, eer_v, min_eer, best_w1, best_w2
 
 
+main = run_lab12_pipeline
+
+
 if __name__ == "__main__":
-    run_lab12_pipeline()
+    main()

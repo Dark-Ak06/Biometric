@@ -226,5 +226,8 @@ def run_lab10_pipeline():
     return genuine_scores, impostor_scores, t_eer, eer_val, auc, t_bank, t_gym
 
 
+main = run_lab10_pipeline
+
+
 if __name__ == "__main__":
-    run_lab10_pipeline()
+    main()

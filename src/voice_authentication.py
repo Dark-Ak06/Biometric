@@ -519,6 +519,9 @@ def verify_live_voice(optimal_threshold=0.960):
     print("=" * 70)
 
 
+main = run_voice_pipeline
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Занятие 8. Голосовая биометрия (Аканов Дархан SIS-2309)")
     parser.add_argument("--record", action="store_true", help="Записать контрольную фразу с микрофона перед верификацией")
