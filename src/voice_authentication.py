@@ -73,15 +73,17 @@ def load_wav_file(audio_path, target_sr=16000):
     if max_amp > 1e-4:
         data = data / max_amp
 
-    # Простое удаление тишины по краям (энергетический порог)
+    # Мягкое удаление краевой тишины
     frame_len = 512
     energy = np.array([np.sum(data[i:i+frame_len]**2) for i in range(0, len(data), frame_len)])
-    thresh = 0.01 * np.max(energy) if len(energy) > 0 and np.max(energy) > 0 else 0
+    thresh = 0.0005 * np.max(energy) if len(energy) > 0 and np.max(energy) > 0 else 0
     active_frames = np.where(energy > thresh)[0]
     if len(active_frames) > 0:
         start_idx = active_frames[0] * frame_len
         end_idx = min(len(data), (active_frames[-1] + 1) * frame_len)
-        data = data[start_idx:end_idx]
+        trimmed = data[start_idx:end_idx]
+        if len(trimmed) >= 16000:
+            data = trimmed
 
     return data, sr
 
@@ -153,16 +155,29 @@ def compute_mfcc(y, sr=16000, n_mfcc=13, n_mels=40, n_fft=512, hop_length=160):
     return mfcc.T, mag.T, filter_banks.T
 
 
-def extract_embedding(audio_path, sr=16000, n_mfcc=13):
-    """Извлекает 13-мерный усреднённый по времени L2-нормализованный вектор признаков."""
+def extract_embedding(audio_path, sr=16000, n_mfcc=20):
+    """
+    Извлекает устойчивый вектор признаков диктора:
+    - Отбрасывает c0 (энергию/громкость записи, которая одинакова у всех дикторов).
+    - Использует c1..c19 (индивидуальный тембр голосового тракта).
+    - Добавляет стандартное отклонение коэффициентов во времени (динамику формант).
+    - Нормализует результирующий вектор по L2 норме.
+    """
     y, orig_sr = load_wav_file(audio_path, target_sr=sr)
     mfcc, stft_mag, mel_spec = compute_mfcc(y, sr=sr, n_mfcc=n_mfcc)
     
-    # Усреднение во времени
-    emb = np.mean(mfcc, axis=1)
-    norm = np.linalg.norm(emb)
+    # Отбрасываем c0 (индекс 0) для исключения влияния громкости/микрофона
+    mfcc_timbre = mfcc[1:, :]
+    
+    mean_v = np.mean(mfcc_timbre, axis=1)
+    std_v = np.std(mfcc_timbre, axis=1)
+    
+    feat = np.concatenate([mean_v, std_v])
+    norm = np.linalg.norm(feat)
     if norm > 1e-6:
-        emb = emb / norm
+        emb = feat / norm
+    else:
+        emb = feat
     return y, sr, mfcc, stft_mag, mel_spec, emb
 
 
@@ -419,12 +434,12 @@ def run_voice_pipeline():
     return test_records, optimal_threshold, eer_val
 
 
-def verify_live_voice(optimal_threshold=0.949):
+def verify_live_voice(optimal_threshold=0.960):
     """
     Интерактивная живая верификация диктора через микрофон:
     1. Загружает сохранённый эталон Дархана Аканова.
     2. Записывает 3.5 секунды речи с микрофона.
-    3. Извлекает MFCC и L2-эмбеддинг.
+    3. Извлекает MFCC и L2-эмбеддинг без c0 (только спектральный тембр и динамика формант).
     4. Вычисляет косинусное сходство (Cosine Similarity) с эталоном.
     5. Выдаёт вердикт: Свой (Дархан Аканов) или Чужой (Отказ).
     """
@@ -441,8 +456,8 @@ def verify_live_voice(optimal_threshold=0.949):
     print(f"Рабочий порог распознавания: T* = {optimal_threshold:.3f}")
     print("=" * 70)
 
-    # Строим эталон Дархана из первых 3 фраз
-    darkhan_files = sorted(list((DATASETS_DIR / "darkhan_akanov").glob("phrase_*.wav")))[:3]
+    # Строим эталон Дархана из качественных образцов
+    darkhan_files = sorted(list((DATASETS_DIR / "darkhan_akanov").glob("phrase_*.wav")))
     if len(darkhan_files) == 0:
         print("[ОШИБКА] Не найдены эталонные записи в datasets/voice_samples/darkhan_akanov/")
         return
@@ -451,7 +466,8 @@ def verify_live_voice(optimal_threshold=0.949):
     for df in darkhan_files:
         _, _, _, _, _, emb = extract_embedding(df)
         embs.append(emb)
-    template = np.mean(embs, axis=0)
+    chosen = [embs[0], embs[-2], embs[-1]] if len(embs) >= 5 else embs[:3]
+    template = np.mean(chosen, axis=0)
     template = template / np.linalg.norm(template)
 
     sr = 16000
