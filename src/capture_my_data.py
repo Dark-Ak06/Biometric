@@ -7,6 +7,8 @@
 import os
 import sys
 import time
+import shutil
+import tempfile
 import argparse
 from pathlib import Path
 import numpy as np
@@ -112,6 +114,48 @@ def record_voice(num_phrases=5, duration=3.5, sr=16000):
     print_status()
 
 
+def safe_imwrite(file_path, img):
+    """Безопасная запись изображения без сбоев на путях с кириллицей."""
+    try:
+        import cv2
+        ext = Path(file_path).suffix or ".jpg"
+        res, buf = cv2.imencode(ext, img)
+        if res:
+            with open(file_path, "wb") as f:
+                f.write(buf)
+            return True
+    except Exception as e:
+        print(f"[!] Ошибка записи {file_path}: {e}")
+    return False
+
+
+def load_face_cascade():
+    """Загружает каскад Хаара, обходя баг OpenCV с кириллическими путями."""
+    import cv2
+    # 1. Проверяем относительный путь от текущей директории
+    rel_path = "datasets/models/haarcascade_frontalface_default.xml"
+    if os.path.exists(rel_path):
+        cascade = cv2.CascadeClassifier(rel_path)
+        if not cascade.empty():
+            return cascade
+
+    # 2. Копируем во временную системную папку (гарантированно ASCII-путь в Windows)
+    src_xml = PROJECT_ROOT / "datasets" / "models" / "haarcascade_frontalface_default.xml"
+    if src_xml.exists():
+        temp_xml = Path(tempfile.gettempdir()) / "haarcascade_frontalface_default.xml"
+        try:
+            shutil.copy2(src_xml, temp_xml)
+            cascade = cv2.CascadeClassifier(str(temp_xml))
+            if not cascade.empty():
+                return cascade
+        except Exception:
+            pass
+
+    # 3. Встроенный каскад из пакета cv2
+    builtin_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    return cv2.CascadeClassifier(builtin_path)
+
+
 def capture_face(num_photos=5):
     """Захватывает серию фото лица с веб-камеры с детекцией лица."""
     try:
@@ -133,11 +177,11 @@ def capture_face(num_photos=5):
         print("[ОШИБКА] Не удалось открыть веб-камеру. Проверьте подключение камеры.")
         return
 
-    cascade_path = PROJECT_ROOT / "datasets" / "models" / "haarcascade_frontalface_default.xml"
-    if cascade_path.exists():
-        face_cascade = cv2.CascadeClassifier(str(cascade_path))
-    else:
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    face_cascade = load_face_cascade()
+    if face_cascade.empty():
+        print("[ОШИБКА] Не удалось инициализировать классификатор лиц (haarcascade).")
+        cap.release()
+        return
 
     count = 0
     instructions = [
@@ -146,6 +190,13 @@ def capture_face(num_photos=5):
         "Кадр 3: Небольшой наклон головы влево",
         "Кадр 4: Лицо с улыбкой / эмоцией",
         "Кадр 5: Изменение угла освещения"
+    ]
+    filenames = [
+        "darkhan_01_frontal.jpg",
+        "darkhan_02_side_light.jpg",
+        "darkhan_03_low_light.jpg",
+        "darkhan_04_tilted.jpg",
+        "darkhan_05_noise.jpg"
     ]
 
     while count < num_photos:
@@ -170,10 +221,13 @@ def capture_face(num_photos=5):
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord(' '):
-            save_path = FACE_DIR / f"darkhan_{count + 1:02d}.jpg"
-            cv2.imwrite(str(save_path), frame)
-            print(f"[+] Сохранён {save_path.name}")
-            count += 1
+            fname = filenames[count] if count < len(filenames) else f"darkhan_{count + 1:02d}.jpg"
+            save_path = FACE_DIR / fname
+            if safe_imwrite(save_path, frame):
+                print(f"[+] Сохранён {save_path.name}")
+                count += 1
+            else:
+                print(f"[!] Не удалось сохранить {save_path.name}")
             time.sleep(0.3)
         elif key == ord('q') or key == 27:
             print("Прервано пользователем.")
