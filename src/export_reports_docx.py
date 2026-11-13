@@ -102,6 +102,14 @@ def clean_latex_math(text: str) -> str:
             (r'\\sigma_0', 'σ₀'),
             (r'\\sigma', 'σ'),
             (r'\\mu', 'μ'),
+            (r'\\tau', 'τ'),
+            (r'\\oplus', '⊕'),
+            (r'\\Delta', 'Δ'),
+            (r'\\lfloor', '⌊'),
+            (r'\\rfloor', '⌋'),
+            (r'\\pmod', 'mod'),
+            (r'\\sum', 'Σ'),
+            (r'\\ne', '≠'),
             (r'\\theta', 'θ'),
             (r'\^\\circ', '°'),
             (r'\^\*', '*'),
@@ -379,6 +387,13 @@ def main():
         "lab04_report.md",
         "lab05_report.md",
         "lab06_report.md",
+        "lab08_report.md",
+        "lab09_report.md",
+        "lab10_report.md",
+        "lab11_report.md",
+        "lab12_report.md",
+        "lab13_report.md",
+        "lab14_report.md",
     ]
 
     generated_docx = []

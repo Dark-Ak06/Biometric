@@ -8,7 +8,9 @@ scripts/
 etc/
 share/
 pyvenv.cfg
-*.bat
+# Allow launcher scripts
+!*.bat
+!*.sh
 
 # Python cache & bytecode
 __pycache__/
