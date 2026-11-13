@@ -248,46 +248,58 @@ def align_face_by_eyes(image, face_cascade, eye_cascade):
     """
     Выравнивает лицо по линии глаз:
     1. Детектирует лицо и глаза внутри области ROI.
-    2. Вычисляет угол между центрами глаз: theta = arctan2(dy, dx).
-    3. Поворачивает изображение через cv2.getRotationMatrix2D и cv2.warpAffine.
-    4. Кадрирует лицо в стандартный биометрический размер 128x128.
+    2. Корректно определяет центры левого и правого глаза (разделение по вертикали).
+    3. Вычисляет угол наклона линии глаз theta = arctan2(dy, dx) (|theta| <= 35°).
+    4. Поворачивает кадр через cv2.getRotationMatrix2D и cv2.warpAffine.
+    5. Кадрирует именно область лица (а не весь кадр) в размер 128x128.
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image.copy()
     h, w = gray.shape[:2]
 
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(60, 60))
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(50, 50))
     if len(faces) == 0:
-        face_roi_gray = gray
-        fx, fy, fw, fh = 0, 0, w, h
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=2, minSize=(40, 40))
+
+    if len(faces) == 0:
+        fx, fy, fw, fh = int(w * 0.2), int(h * 0.15), int(w * 0.6), int(h * 0.7)
     else:
         fx, fy, fw, fh = faces[0]
-        face_roi_gray = gray[fy:fy+fh, fx:fx+fw]
 
-    upper_face = face_roi_gray[:int(fh * 0.65), :]
-    eyes = eye_cascade.detectMultiScale(upper_face, scaleFactor=1.08, minNeighbors=2, minSize=(12, 12))
+    face_roi = gray[fy:fy+fh, fx:fx+fw]
+    upper_face = face_roi[:int(fh * 0.65), :]
+    eyes = eye_cascade.detectMultiScale(upper_face, scaleFactor=1.08, minNeighbors=2, minSize=(15, 15))
 
-    eye_centers = []
-    if len(eyes) >= 2:
-        eyes_sorted = sorted(eyes, key=lambda b: b[0])
-        e1, e2 = eyes_sorted[0], eyes_sorted[1]
-        c1 = (fx + e1[0] + e1[2] // 2, fy + e1[1] + e1[3] // 2)
-        c2 = (fx + e2[0] + e2[2] // 2, fy + e2[1] + e2[3] // 2)
-        eye_centers = [c1, c2]
+    left_candidates = [e for e in eyes if (e[0] + e[2]/2) < fw * 0.5]
+    right_candidates = [e for e in eyes if (e[0] + e[2]/2) >= fw * 0.5]
+
+    if left_candidates and right_candidates:
+        e_left = max(left_candidates, key=lambda b: b[2] * b[3])
+        e_right = max(right_candidates, key=lambda b: b[2] * b[3])
+        c1 = (int(fx + e_left[0] + e_left[2] // 2), int(fy + e_left[1] + e_left[3] // 2))
+        c2 = (int(fx + e_right[0] + e_right[2] // 2), int(fy + e_right[1] + e_right[3] // 2))
     else:
         c1 = (int(fx + fw * 0.32), int(fy + fh * 0.38))
         c2 = (int(fx + fw * 0.68), int(fy + fh * 0.38))
-        eye_centers = [c1, c2]
 
-    pt_left, pt_right = eye_centers[0], eye_centers[1]
-    dx = float(pt_right[0] - pt_left[0])
-    dy = float(pt_right[1] - pt_left[1])
+    eye_centers = [c1, c2]
+    dx = float(c2[0] - c1[0])
+    dy = float(c2[1] - c1[1])
     angle = float(math.degrees(math.atan2(dy, dx)))
+    if abs(angle) > 35.0:
+        angle = 0.0
 
-    eye_center = (float((pt_left[0] + pt_right[0]) / 2.0), float((pt_left[1] + pt_right[1]) / 2.0))
+    eye_center = (float((c1[0] + c2[0]) / 2.0), float((c1[1] + c2[1]) / 2.0))
     M = cv2.getRotationMatrix2D(eye_center, angle, 1.0)
     aligned_full = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
-    aligned_crop = cv2.resize(aligned_full, (128, 128))
+    # Точный кроп области лица из выровненного кадра
+    pad_h = int(fh * 0.06)
+    pad_w = int(fw * 0.06)
+    y1, y2 = max(0, fy - pad_h), min(h, fy + fh + pad_h)
+    x1, x2 = max(0, fx - pad_w), min(w, fx + fw + pad_w)
+    face_crop = aligned_full[y1:y2, x1:x2]
+
+    aligned_crop = cv2.resize(face_crop, (128, 128))
     return aligned_crop, angle, eye_centers, gray
 
 
@@ -333,9 +345,9 @@ def run_alignment_demonstration(face_cascade, eye_cascade):
 # ==============================================================================
 # ШАГ 4. Обучение LBPH и бенчмарк влияния предобработки
 # ==============================================================================
-def train_lbph_recognizer():
+def train_lbph_recognizer(face_cascade, eye_cascade):
     """
-    Обучает LBPHFaceRecognizer на фотографиях Дархана Аканова (класс 0)
+    Обучает LBPHFaceRecognizer на нормализованных кропах лица Дархана Аканова (класс 0)
     и эталонах ORL Faces (классы 1..5).
     """
     if not hasattr(cv2, 'face') or not hasattr(cv2.face, 'LBPHFaceRecognizer_create'):
@@ -343,16 +355,30 @@ def train_lbph_recognizer():
         return None
 
     recognizer = cv2.face.LBPHFaceRecognizer_create(radius=1, neighbors=8, grid_x=8, grid_y=8)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
     train_images = []
     train_labels = []
 
-    # 1. Все доступные снимки Дархана (разные ракурсы и освещение)
+    # 1. Снимки Дархана (извлекаем точные кропы лиц + CLAHE для всепогодного распознавания)
     darkhan_files = sorted(list(DARKHAN_FACES_DIR.glob("*.jpg")))
     for df in darkhan_files:
-        im = safe_imread(df, cv2.IMREAD_GRAYSCALE)
+        im = safe_imread(df)
         if im is not None:
-            train_images.append(cv2.resize(im, (128, 128)))
+            gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if len(im.shape) == 3 else im.copy()
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(50, 50))
+            if len(faces) > 0:
+                x, y, w, h = faces[0]
+                raw_face = cv2.resize(gray[y:y+h, x:x+w], (128, 128))
+                train_images.append(raw_face)
+                train_labels.append(0)
+                train_images.append(clahe.apply(raw_face))
+                train_labels.append(0)
+
+            aligned_crop, _, _, _ = align_face_by_eyes(im, face_cascade, eye_cascade)
+            train_images.append(aligned_crop)
+            train_labels.append(0)
+            train_images.append(clahe.apply(aligned_crop))
             train_labels.append(0)
 
     # 2. Эталоны других людей из ORL Faces (субъекты 1..5)
@@ -362,11 +388,14 @@ def train_lbph_recognizer():
             for img_p in list(s_dir.glob("*.png"))[:5]:
                 im = safe_imread(img_p, cv2.IMREAD_GRAYSCALE)
                 if im is not None:
-                    train_images.append(cv2.resize(im, (128, 128)))
+                    c = cv2.resize(im, (128, 128))
+                    train_images.append(c)
+                    train_labels.append(subj_id)
+                    train_images.append(clahe.apply(c))
                     train_labels.append(subj_id)
 
     recognizer.train(train_images, np.array(train_labels, dtype=np.int32))
-    print(f"  [OK] LBPH-классификатор обучен: {len(train_images)} кадров, {len(set(train_labels))} классов.")
+    print(f"  [OK] LBPH-классификатор обучен: {len(train_images)} кропов лица, {len(set(train_labels))} классов.")
     return recognizer
 
 
@@ -376,7 +405,7 @@ def run_lbph_evaluation_pipeline(face_cascade, eye_cascade, recognizer=None):
     """
     print("\n[ШАГ 4] Оценка влияния предобработки на точность LBPH-распознавателя:")
     if recognizer is None:
-        recognizer = train_lbph_recognizer()
+        recognizer = train_lbph_recognizer(face_cascade, eye_cascade)
     if recognizer is None:
         return None
 
@@ -403,9 +432,16 @@ def run_lbph_evaluation_pipeline(face_cascade, eye_cascade, recognizer=None):
         if img is None:
             continue
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img.copy()
+        h, w = gray.shape[:2]
 
-        # 1. Сырой
-        raw_crop = cv2.resize(gray, (128, 128))
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(50, 50))
+        if len(faces) == 0:
+            fx, fy, fw, fh = int(w * 0.2), int(h * 0.15), int(w * 0.6), int(h * 0.7)
+        else:
+            fx, fy, fw, fh = faces[0]
+
+        # 1. Сырой кроп лица
+        raw_crop = cv2.resize(gray[fy:fy+fh, fx:fx+fw], (128, 128))
         label_raw, conf_raw = recognizer.predict(raw_crop)
         confidences_by_mode["1. Сырые (Raw)"].append(conf_raw)
         if label_raw == 0: correct_by_mode["1. Сырые (Raw)"] += 1
@@ -640,7 +676,7 @@ def run_image_preprocessing_pipeline(scan_webcam=True, interactive=False):
     face_cascade, eye_cascade = ensure_models()
 
     # Обучаем LBPH-распознаватель на снимках Дархана и ORL
-    recognizer = train_lbph_recognizer()
+    recognizer = train_lbph_recognizer(face_cascade, eye_cascade)
 
     # 1. Сканирование лица с веб-камеры (если включено)
     if scan_webcam and recognizer is not None:
