@@ -57,6 +57,23 @@ def create_notebook(title, subtitle, lab_num, description, code_cells):
 def main():
     notebooks = {}
 
+    # Общий надёжный преамбул для нахождения корня и перезагрузки модулей
+    def make_preamble(mod_name):
+        return (
+            "import os, sys, importlib\n"
+            "from pathlib import Path\n"
+            "from IPython.display import Image, display\n\n"
+            "# 1. Гарантированный поиск корня проекта без риска потери рабочей директории\n"
+            "curr = Path.cwd()\n"
+            "PROJECT_ROOT = curr if (curr / 'src').is_dir() else (curr.parent if (curr.parent / 'src').is_dir() else Path.cwd())\n"
+            "src_dir = PROJECT_ROOT / 'src'\n"
+            "if str(src_dir) not in sys.path:\n"
+            "    sys.path.insert(0, str(src_dir))\n\n"
+            f"# 2. Импорт и принудительная перезагрузка {mod_name} из диска (без необходимости рестарта Kernel)\n"
+            f"import {mod_name}\n"
+            f"importlib.reload({mod_name})\n"
+        )
+
     # Lab 8
     notebooks["lab08_voice_authentication.ipynb"] = create_notebook(
         "Голосовая биометрическая аутентификация",
@@ -65,21 +82,40 @@ def main():
         "Реализовать базовую верификацию диктора по голосу с использованием MFCC-признаков и косинусного сходства.",
         [
             ("1. Извлечение 13 мел-кепстральных коэффициентов (MFCC)",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nfrom voice_authentication import extract_embedding, run_voice_pipeline\n\nsample_path = '../datasets/voice_samples/darkhan_akanov/phrase_01.wav'\ny, sr, mfcc, stft, mel, emb = extract_embedding(sample_path)\nprint(f'Длина: {len(y)} отсчётов ({len(y)/sr:.2f} сек), MFCC shape: {mfcc.shape}, Embedding: {emb.shape}')"),
-            ("2. Запуск конвейера верификации и расчёт EER",
-             "os.chdir('..')\ntest_records, opt_th, eer = run_voice_pipeline()\nos.chdir('notebooks')\nprint(f'Готово! Оптимальный порог T* = {opt_th:.3f}, EER = {eer:.1f}%')")
+             make_preamble("voice_authentication") + "\n"
+             "sample_path = PROJECT_ROOT / 'datasets' / 'voice_samples' / 'darkhan_akanov' / 'phrase_01.wav'\n"
+             "y, sr, mfcc, stft, mel, emb = voice_authentication.extract_embedding(sample_path)\n"
+             "print(f'Длина: {len(y)} отсчётов ({len(y)/sr:.2f} сек), MFCC shape: {mfcc.shape}, Embedding: {emb.shape}')"),
+            ("2. Запуск конвейера верификации голоса и расчёт EER",
+             "test_records, opt_th, eer = voice_authentication.run_voice_pipeline()\n"
+             "print(f'Готово! Оптимальный порог T* = {opt_th:.3f}, EER = {eer:.1f}%')\n\n"
+             "plot_path = PROJECT_ROOT / 'reports' / 'lab08_voice_features_analysis.png'\n"
+             "if plot_path.exists():\n"
+             "    display(Image(filename=str(plot_path)))")
         ]
     )
 
     # Lab 9
     notebooks["lab09_image_preprocessing.ipynb"] = create_notebook(
         "Предобработка биометрических изображений с OpenCV",
-        "Эквализация гистограмм, фильтрация шума и аффинное выравнивание лиц",
+        "Эквализация гистограмм, фильтрация шума, аффинное выравнивание и сканирование лица",
         9,
-        "Освоить типовые методы предобработки биометрических изображений (эквализация, фильтрация шума, выравнивание лица по глазам) и оценить их влияние на распознавание LBPH.",
+        "Освоить методы предобработки биометрических изображений (эквализация CLAHE, фильтрация шума, выравнивание по глазам), провести мгновенное сканирование лица с веб-камеры и оценить распознавание LBPH.",
         [
-            ("Запуск конвейера предобработки и бенчмарка LBPH",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nimport image_preprocessing\n\nos.chdir('..')\nimage_preprocessing.main()\nos.chdir('notebooks')\nprint('Бенчмарк предобработки и распознавания успешно завершён!')")
+            ("1. Сканирование лица с веб-камеры и запуск конвейера предобработки",
+             make_preamble("image_preprocessing") + "\n"
+             "# Запуск сканирования лица с веб-камеры в реальном времени и полного бенчмарка\n"
+             "print('Запуск Занятия 9: сканирование лица и оценка предобработки...')\n"
+             "image_preprocessing.main(scan_webcam=True)"),
+            ("2. Просмотр результатов сканирования и влияния предобработки на LBPH",
+             "scan_img = PROJECT_ROOT / 'reports' / 'lab09_live_scan_result.png'\n"
+             "if scan_img.exists():\n"
+             "    print('Результат сканирования лица с веб-камеры:')\n"
+             "    display(Image(filename=str(scan_img)))\n\n"
+             "bench_img = PROJECT_ROOT / 'reports' / 'lab09_lbph_recognition_benchmark.png'\n"
+             "if bench_img.exists():\n"
+             "    print('Бенчмарк влияния методов предобработки на LBPH:')\n"
+             "    display(Image(filename=str(bench_img)))")
         ]
     )
 
@@ -91,7 +127,11 @@ def main():
         "Провести расчёт ключевых вероятностных метрик биометрической точности (FAR, FRR, EER, AUC), визуализировать распределения Genuine и Impostor оценок и обосновать выбор порогов верификации.",
         [
             ("Запуск моделирования метрик точности и построение ROC-кривой",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nimport lab10_metrics_eer\n\nos.chdir('..')\nlab10_metrics_eer.main()\nos.chdir('notebooks')\nprint('Расчёт FAR/FRR/EER завершён!')")
+             make_preamble("lab10_metrics_eer") + "\n"
+             "lab10_metrics_eer.main()\n\n"
+             "roc_plot = PROJECT_ROOT / 'reports' / 'lab10_roc_curve.png'\n"
+             "if roc_plot.exists():\n"
+             "    display(Image(filename=str(roc_plot)))")
         ]
     )
 
@@ -103,7 +143,11 @@ def main():
         "Исследовать спуфинг-атаки (предъявление фото/экрана) на биометрическую систему лица, реализовать алгоритмы Presentation Attack Detection (текстурный анализ лапласиана и отслеживание моргания) и оценить метрики APCER и BPCER.",
         [
             ("Запуск тестирования Liveness Detection и расчёт APCER/BPCER",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nimport lab11_spoofing_liveness\n\nos.chdir('..')\nlab11_spoofing_liveness.main()\nos.chdir('notebooks')\nprint('Тестирование Presentation Attack Detection успешно выполнено!')")
+             make_preamble("lab11_spoofing_liveness") + "\n"
+             "lab11_spoofing_liveness.main()\n\n"
+             "pad_plot = PROJECT_ROOT / 'reports' / 'lab11_liveness_detection.png'\n"
+             "if pad_plot.exists():\n"
+             "    display(Image(filename=str(pad_plot)))")
         ]
     )
 
@@ -115,7 +159,11 @@ def main():
         "Разработать и оценить мультимодальную систему аутентификации, объединяющую биометрию лица (LBPH) и голоса (MFCC) на уровне решений (Score Fusion) с оптимизацией весовых коэффициентов.",
         [
             ("Запуск мультимодального слияния (Score Fusion) и сравнение EER",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nimport lab12_multimodal_fusion\n\nos.chdir('..')\nlab12_multimodal_fusion.main()\nos.chdir('notebooks')\nprint('Оптимизация мультимодального весового коэффициента завершена!')")
+             make_preamble("lab12_multimodal_fusion") + "\n"
+             "lab12_multimodal_fusion.main()\n\n"
+             "fuse_plot = PROJECT_ROOT / 'reports' / 'lab12_multimodal_roc_comparison.png'\n"
+             "if fuse_plot.exists():\n"
+             "    display(Image(filename=str(fuse_plot)))")
         ]
     )
 
@@ -127,7 +175,11 @@ def main():
         "Реализовать многофакторную схему аутентификации (MFA), объединяющую биометрический фактор (лицо/голос) с генератором одноразовых паролей по времени (TOTP), сформировать QR-код для Google Authenticator и разработать резервный Fallback-контур.",
         [
             ("Запуск сценариев биометрической MFA и проверка перехода в Fallback",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nimport lab13_biometric_mfa\n\nos.chdir('..')\nlab13_biometric_mfa.main()\nos.chdir('notebooks')\nprint('MFA конвейер успешно протестирован!')")
+             make_preamble("lab13_biometric_mfa") + "\n"
+             "lab13_biometric_mfa.main()\n\n"
+             "mfa_plot = PROJECT_ROOT / 'reports' / 'lab13_mfa_scenarios.png'\n"
+             "if mfa_plot.exists():\n"
+             "    display(Image(filename=str(mfa_plot)))")
         ]
     )
 
@@ -139,7 +191,11 @@ def main():
         "Изучить требования GDPR ст. 9 и закона РК о персональных данных, реализовать схему отменяемой биометрии BioHashing, доказать статистическую независимость при смене ключа и провести аудит приватности системы.",
         [
             ("Запуск экспериментов BioHashing и демонстрация отзываемости ключа",
-             "import os, sys\nsys.path.append(os.path.abspath('../src'))\nimport lab14_privacy_biohashing\n\nos.chdir('..')\nlab14_privacy_biohashing.main()\nos.chdir('notebooks')\nprint('BioHashing эксперименты и аудит приватности завершены!')")
+             make_preamble("lab14_privacy_biohashing") + "\n"
+             "lab14_privacy_biohashing.main()\n\n"
+             "bio_plot = PROJECT_ROOT / 'reports' / 'lab14_biohashing_scheme.png'\n"
+             "if bio_plot.exists():\n"
+             "    display(Image(filename=str(bio_plot)))")
         ]
     )
 
