@@ -29,21 +29,21 @@ plt.style.use("default")
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Calibri']
 plt.rcParams['axes.unicode_minus'] = False
 
-REPORTS_DIR = Path("reports")
-DARKHAN_FACES_DIR = Path("datasets/darkhan_face")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+REPORTS_DIR = PROJECT_ROOT / "reports"
+DARKHAN_FACES_DIR = PROJECT_ROOT / "datasets" / "darkhan_face"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def safe_imread(path, flags=cv2.IMREAD_COLOR):
-    p_str = str(path)
-    img = cv2.imread(p_str, flags)
-    if img is not None:
-        return img
     try:
+        p_str = str(path)
         data = np.fromfile(p_str, dtype=np.uint8)
-        return cv2.imdecode(data, flags)
+        if data is not None and len(data) > 0:
+            return cv2.imdecode(data, flags)
     except Exception:
-        return None
+        pass
+    return None
 
 
 def calculate_laplacian_variance(gray_img):

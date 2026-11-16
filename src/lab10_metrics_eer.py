@@ -30,7 +30,8 @@ plt.style.use("default")
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Calibri']
 plt.rcParams['axes.unicode_minus'] = False
 
-REPORTS_DIR = Path("reports")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+REPORTS_DIR = PROJECT_ROOT / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
