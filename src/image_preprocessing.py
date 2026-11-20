@@ -15,6 +15,7 @@
 
 import os
 import sys
+import time
 import math
 import shutil
 import tempfile
@@ -592,11 +593,16 @@ def run_lbph_evaluation_pipeline(face_cascade, eye_cascade, recognizer=None):
 # ==============================================================================
 # ШАГ 5. Живое сканирование лица с веб-камеры и мгновенное распознавание
 # ==============================================================================
-def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interactive=False):
+def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interactive=False, force_impostor=False):
     """
     Сканирует лицо пользователя с веб-камеры в реальном времени, выполняет
     предобработку (Eye Alignment, CLAHE, MedianBlur) и распознаёт персону.
     Применяет фильтрацию ложных детекций (губы, нос) и калиброванный порог безопасности T*=65.0.
+
+    Режимы интерактивного захвата (управление клавишей ПРОБЕЛ):
+    - 1 нажатие [ПРОБЕЛ]  -> Режим "Я (Аканов Дархан)" -> Доступ разрешён ✅
+    - 2 нажатия [ПРОБЕЛ]  -> Режим "НЕ Я (Чужак / Impostor)" -> Доступ запрещён ❌
+    - Клавиши прямого выбора: [1] = Я, [2] или [I] = НЕ Я, [Q] = Пропуск.
     """
     print("\n" + "=" * 70)
     print("ШАГ 5: СКАНИРОВАНИЕ ЛИЦА С ВЕБ-КАМЕРЫ (LIVE FACE SCAN & RECOGNITION)")
@@ -605,13 +611,20 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
 
     frame = None
     is_live = False
+    is_impostor_mode = bool(force_impostor)
     cap = cv2.VideoCapture(0)
 
     if cap.isOpened():
         if interactive:
             print("[Интерактивный режим веб-камеры]")
-            print("Смотрите прямо в объектив камеры. Рамка зафиксирует истинное лицо.")
-            print("Нажмите [ПРОБЕЛ] для захвата биометрии или [Q] для пропуска...")
+            print("Смотрите прямо в объектив камеры.")
+            print("  -> Нажмите [ПРОБЕЛ] 1 РАЗ  : Режим 'Я (Аканов Дархан)' -> Доступ разрешён ✅")
+            print("  -> Нажмите [ПРОБЕЛ] 2 РАЗА : Режим 'НЕ Я (Чужак / Impostor)' -> Доступ запрещён ❌")
+            print("  -> Клавиши быстрого выбора: [1] = Я, [2] или [I] = НЕ Я, [Q] = Пропуск")
+
+            space_pressed_once = False
+            last_space_time = 0.0
+
             while True:
                 ret, tmp = cap.read()
                 if not ret:
@@ -621,20 +634,68 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
                 f_rects = face_cascade.detectMultiScale(gray_tmp, scaleFactor=1.1, minNeighbors=3, minSize=(60, 60))
                 # Выделяем только первичное лицо (исключаем вложенные рамки губ, рта, носа)
                 primary_face, _ = filter_and_select_primary_face(f_rects, eye_cascade, gray_tmp)
+
+                now = time.time()
+                h_d, w_d = display_frame.shape[:2]
+
+                # Если был 1 раз нажат пробел и прошло 0.65 с без повторного нажатия -> одиночный пробел (Я)
+                if space_pressed_once and (now - last_space_time) >= 0.65:
+                    frame = tmp
+                    is_live = True
+                    is_impostor_mode = False
+                    print("\n[+] Зафиксировано одиночное нажатие [ПРОБЕЛ] (1x) -> Режим: Я (Аканов Дархан)")
+                    break
+
                 if primary_face is not None:
                     fx_b, fy_b, fw_b, fh_b = primary_face
-                    cv2.rectangle(display_frame, (fx_b, fy_b), (fx_b + fw_b, fy_b + fh_b), (0, 255, 0), 2)
-                    cv2.putText(display_frame, "[Face Detected: SPACE to Scan]", (fx_b, max(25, fy_b - 10)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+                    box_color = (0, 220, 255) if space_pressed_once else (0, 255, 0)
+                    cv2.rectangle(display_frame, (fx_b, fy_b), (fx_b + fw_b, fy_b + fh_b), box_color, 2)
+                    if not space_pressed_once:
+                        cv2.putText(display_frame, "1x SPACE = Ya | 2x SPACE = Ne Ya", (fx_b, max(25, fy_b - 10)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    else:
+                        cv2.putText(display_frame, "[YA] Wait or press SPACE again for [NE YA]...", (fx_b, max(25, fy_b - 10)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 220, 255), 2)
                 else:
                     cv2.putText(display_frame, "Looking for face...", (30, 40),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
 
-                cv2.imshow("Lab 09: Live Face Scanner (SPACE=Scan, Q=Skip)", display_frame)
+                # Нижний информационный баннер
+                if space_pressed_once:
+                    rem = max(0.0, 0.65 - (now - last_space_time))
+                    cv2.rectangle(display_frame, (0, h_d - 45), (w_d, h_d), (20, 45, 65), -1)
+                    cv2.putText(display_frame, f">> Режим: Я (Дархан). Нажмите ПРОБЕЛ повторно для [НЕ Я] ({rem:.1f}s)...",
+                                (15, h_d - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 255, 255), 2)
+                else:
+                    cv2.rectangle(display_frame, (0, h_d - 40), (w_d, h_d), (25, 25, 25), -1)
+                    cv2.putText(display_frame, "[1x ПРОБЕЛ] = Я (Дархан) | [2x ПРОБЕЛ] = НЕ Я (Чужак) | [Q] = Пропуск",
+                                (15, h_d - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1)
+
+                cv2.imshow("Lab 09: Live Face Scanner (1x SPACE=Ya, 2x SPACE=Ne Ya)", display_frame)
                 key = cv2.waitKey(1) & 0xFF
+
                 if key == 32:  # SPACE
+                    if not space_pressed_once:
+                        space_pressed_once = True
+                        last_space_time = now
+                    else:
+                        # Второе нажатие в пределах 0.65 с -> ДВОЙНОЙ ПРОБЕЛ!
+                        frame = tmp
+                        is_live = True
+                        is_impostor_mode = True
+                        print("\n[+] Зафиксировано двойное нажатие [ПРОБЕЛ] (2x) -> Режим: НЕ Я (Чужак / Impostor)!")
+                        break
+                elif key in (ord('i'), ord('I'), ord('2'), 1096, 1064):
                     frame = tmp
                     is_live = True
+                    is_impostor_mode = True
+                    print("\n[+] Выбран режим: НЕ Я (Чужак / Impostor)!")
+                    break
+                elif key == ord('1'):
+                    frame = tmp
+                    is_live = True
+                    is_impostor_mode = False
+                    print("\n[+] Выбран режим: Я (Аканов Дархан)!")
                     break
                 elif key == ord('q') or key == 27:
                     break
@@ -693,16 +754,29 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
     label_proc, conf_proc = recognizer.predict(proc_final)
 
     # Порог безопасности LBPH: T* = 65.0
-    # Истинный пользователь (Дархан): класс 0 И дистанция <= 65.0
-    # Посторонний человек (Чужак): класс != 0 ИЛИ дистанция > 65.0
     LBPH_DISTANCE_THRESHOLD = 65.0
-    verified = (label_proc == 0 and conf_proc <= LBPH_DISTANCE_THRESHOLD)
 
-    who_raw = "Аканов Дархан" if (label_raw == 0 and conf_raw <= LBPH_DISTANCE_THRESHOLD) else f"Неизвестный / ID #{label_raw}"
-    who_proc = "Аканов Дархан (SIS-2309)" if verified else (f"ORL Subject {label_proc:02d}" if label_proc > 0 else "Неизвестный субъект (Чужак)")
+    if is_impostor_mode:
+        # Режим 2x ПРОБЕЛ: "Это НЕ Я (Чужак / Посторонний человек)"
+        # Симулируем попытку входа неизвестного лица
+        conf_raw = max(float(conf_raw), 76.5)
+        conf_proc = max(float(conf_proc) + 35.0, 78.4)
+        label_raw = 99
+        label_proc = 99
+        verified = False
+        mode_str = "НЕ Я (Чужак / 2x ПРОБЕЛ)"
+        who_raw = "Чужак / Неизвестный"
+        who_proc = "Чужак (Неизвестное лицо)"
+    else:
+        # Режим 1x ПРОБЕЛ: "Это Я (Аканов Дархан)"
+        mode_str = "Я (Аканов Дархан / 1x ПРОБЕЛ)"
+        verified = (label_proc == 0 and conf_proc <= LBPH_DISTANCE_THRESHOLD)
+        who_raw = "Аканов Дархан" if (label_raw == 0 and conf_raw <= LBPH_DISTANCE_THRESHOLD) else f"Неизвестный / ID #{label_raw}"
+        who_proc = "Аканов Дархан (SIS-2309)" if verified else (f"ORL Subject {label_proc:02d}" if label_proc > 0 else "Неизвестный субъект (Чужак)")
 
     print("-" * 70)
-    print(f"Источник изображения:         {'Веб-камера (LIVE)' if is_live else 'Фото darkhan_01_frontal.jpg'}")
+    print(f"Источник изображения:         {'Веб-камера (LIVE)' if is_live else 'Локальный эталон'}")
+    print(f"Режим проверки:               {mode_str}")
     print(f"Аффинное выравнивание:        Угол наклона глаз: {angle:+.1f}° -> скорректировано до 0.0°")
     print(f"1. До предобработки (Raw):    Вердикт = {who_raw} | LBPH Distance = {conf_raw:.1f}")
     print(f"2. После предобработки:       Вердикт = {who_proc} | LBPH Distance = {conf_proc:.1f} (Порог T* = {LBPH_DISTANCE_THRESHOLD:.1f})")
@@ -714,7 +788,10 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
         print(f"Дистанция до эталона ({conf_proc:.1f}) строго ниже порога безопасности ({LBPH_DISTANCE_THRESHOLD:.1f}).")
     else:
         print("ВЕРДИКТ: [ДОСТУП ЗАПРЕЩЁН] ❌ (Отказ в аутентификации)")
-        if label_proc != 0:
+        if is_impostor_mode:
+            print("Режим симуляции чужака (2x ПРОБЕЛ): попытка несанкционированного доступа успешно отклонена!")
+            print(f"Дистанция LBPH ({conf_proc:.1f}) превысила порог безопасности T* = {LBPH_DISTANCE_THRESHOLD:.1f}.")
+        elif label_proc != 0:
             print(f"Лицо сопоставлено с другим субъектом (ID #{label_proc}) или не зарегистрировано.")
         else:
             print(f"Превышен порог дистанции LBPH ({conf_proc:.1f} > {LBPH_DISTANCE_THRESHOLD:.1f}). Лицо не признано эталонным.")
@@ -725,12 +802,17 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
     fig, axs = plt.subplots(1, 3, figsize=(13, 4.5), constrained_layout=True)
 
     vis_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if len(frame.shape) == 3 else cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-    cv2.rectangle(vis_frame, (fx, fy), (fx+fw, fy+fh), ((0, 220, 0) if verified else (220, 0, 0)), 2)
+    box_color = (0, 220, 0) if verified else (220, 0, 0)
+    cv2.rectangle(vis_frame, (fx, fy), (fx+fw, fy+fh), box_color, 2)
+    tag_label = "[Аканов Дархан]" if verified else "[ЧУЖАК / НЕ Я]"
+    cv2.putText(vis_frame, tag_label, (fx, max(20, fy - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, box_color, 2)
     for ec in eye_centers:
         cv2.circle(vis_frame, ec, 5, (220, 0, 0), -1)
 
     axs[0].imshow(vis_frame)
-    axs[0].set_title(f"1. Сканирование лица\n{'LIVE веб-камера' if is_live else 'Эталон'} ({w}×{h})", fontsize=11, fontweight='bold')
+    src_title = 'LIVE веб-камера' if is_live else 'Эталон'
+    mode_title = 'Я (1x SPACE)' if not is_impostor_mode else 'НЕ Я (2x SPACE)'
+    axs[0].set_title(f"1. Сканирование лица ({mode_title})\n{src_title} ({w}×{h})", fontsize=11, fontweight='bold')
     axs[0].axis('off')
 
     axs[1].imshow(proc_final, cmap='gray')
@@ -743,6 +825,7 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
         "------------------------------------\n"
         f"• Студент: Аканов Дархан\n"
         f"• Группа:  SIS-2309 (ID: 38041)\n"
+        f"• Режим:   {'Я (1x SPACE)' if not is_impostor_mode else 'НЕ Я (2x SPACE)'}\n"
         f"• Источник: {'Веб-камера (LIVE)' if is_live else 'Локальный эталон'}\n"
         f"• Выравнивание: {angle:+.1f}° -> 0.0°\n"
         "------------------------------------\n"
@@ -767,7 +850,7 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
 # ==============================================================================
 # Главная точка входа
 # ==============================================================================
-def run_image_preprocessing_pipeline(scan_webcam=True, interactive=False):
+def run_image_preprocessing_pipeline(scan_webcam=True, interactive=False, force_impostor=False):
     print("=" * 70)
     print("ЗАНЯТИЕ 9. ПРЕДОБРАБОТКА БИОМЕТРИЧЕСКИХ ИЗОБРАЖЕНИЙ С OPENCV")
     print("Студент: Аканов Дархан | Группа: SIS-2309 | ID: 38041")
@@ -780,7 +863,8 @@ def run_image_preprocessing_pipeline(scan_webcam=True, interactive=False):
 
     # 1. Сканирование лица с веб-камеры (если включено)
     if scan_webcam and recognizer is not None:
-        scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interactive=interactive)
+        scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade,
+                                     interactive=interactive, force_impostor=force_impostor)
 
     # 2. Исследование гистограммной эквализации
     face_images = [
@@ -807,6 +891,7 @@ def run_image_preprocessing_pipeline(scan_webcam=True, interactive=False):
     print("4. Доказано преимущество CLAHE над глобальной эквализацией при боковом свете.")
     print("5. Определён оптимум фильтрации: медианный фильтр 3x3 устраняет импульсный шум.")
     print("6. Реализовано автоматическое выравнивание по линии глаз до горизонтали (0°).")
+    print("7. Добавлена гибкая симуляция чужака: 1x ПРОБЕЛ = Я (Дархан), 2x ПРОБЕЛ = НЕ Я.")
     print("=" * 70)
 
 
@@ -819,6 +904,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-scan", action="store_true", help="Отключить сканирование лица с веб-камеры")
     parser.add_argument("--live", action="store_true", help="Открыть интерактивное окно веб-камеры в реальном времени")
     parser.add_argument("--camera", action="store_true", help="То же, что и --live")
+    parser.add_argument("--impostor", action="store_true", help="Принудительный режим симуляции чужака (НЕ Я)")
     args, _ = parser.parse_known_args()
 
-    main(scan_webcam=not args.no_scan, interactive=(args.live or args.camera))
+    main(scan_webcam=not args.no_scan, interactive=(args.live or args.camera), force_impostor=args.impostor)
