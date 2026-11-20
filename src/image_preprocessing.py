@@ -605,10 +605,10 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
 
     frame = None
     is_live = False
-    cap = cv2.VideoCapture(0)
 
-    if cap.isOpened():
-        if interactive:
+    if interactive:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
             print("[Интерактивный режим веб-камеры]")
             print("Смотрите прямо в объектив камеры. Рамка зафиксирует истинное лицо.")
             print("Нажмите [ПРОБЕЛ] для захвата биометрии или [Q] для пропуска...")
@@ -639,16 +639,9 @@ def scan_and_recognize_live_face(recognizer, face_cascade, eye_cascade, interact
                 elif key == ord('q') or key == 27:
                     break
             cv2.destroyAllWindows()
+            cap.release()
         else:
-            print("[+] Инициализация веб-камеры... Захват живого кадра лица...")
-            for _ in range(6):
-                ret, tmp = cap.read()
-                if ret and tmp is not None:
-                    frame = tmp
-                    is_live = True
-        cap.release()
-    else:
-        print("[!] Веб-камера недоступна или занята другим приложением.")
+            print("[!] Веб-камера недоступна или занята другим приложением.")
 
     if frame is None or not is_live:
         print("[i] Используется эталонная фотография: datasets/darkhan_face/darkhan_01_frontal.jpg")
