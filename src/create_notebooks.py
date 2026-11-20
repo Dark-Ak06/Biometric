@@ -105,9 +105,8 @@ def main():
             ("1. Сканирование лица с веб-камеры и запуск конвейера предобработки",
              make_preamble("image_preprocessing") + "\n"
              "# Запуск сканирования лица с веб-камеры в реальном времени и полного бенчмарка\n"
-             "# Для симуляции чужака ('НЕ Я'): передайте force_impostor=True\n"
              "print('Запуск Занятия 9: сканирование лица и оценка предобработки...')\n"
-             "image_preprocessing.main(scan_webcam=True, force_impostor=False)"),
+             "image_preprocessing.main(scan_webcam=True)"),
             ("2. Просмотр результатов сканирования и влияния предобработки на LBPH",
              "scan_img = PROJECT_ROOT / 'reports' / 'lab09_live_scan_result.png'\n"
              "if scan_img.exists():\n"
