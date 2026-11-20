@@ -526,7 +526,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Занятие 8. Голосовая биометрия (Аканов Дархан SIS-2309)")
     parser.add_argument("--record", action="store_true", help="Записать контрольную фразу с микрофона перед верификацией")
     parser.add_argument("--live", action="store_true", help="Интерактивная живая проверка голоса в реальном времени")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     if args.live:
         verify_live_voice()

@@ -716,6 +716,6 @@ if __name__ == "__main__":
     parser.add_argument("--no-scan", action="store_true", help="Отключить сканирование лица с веб-камеры")
     parser.add_argument("--live", action="store_true", help="Открыть интерактивное окно веб-камеры в реальном времени")
     parser.add_argument("--camera", action="store_true", help="То же, что и --live")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     main(scan_webcam=not args.no_scan, interactive=(args.live or args.camera))
